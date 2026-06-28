@@ -136,6 +136,55 @@ button { cursor: pointer; }
   flex: 0 0 auto;
 }
 
+.login-form {
+  margin-top: 22px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.login-form .field label {
+  margin-bottom: 6px;
+  color: var(--ink);
+}
+
+.login-form .field input {
+  height: 44px;
+  background: #f7fafb;
+}
+
+.login-error {
+  padding: 10px;
+  border-radius: 8px;
+  background: #fdecec;
+  color: #b43b35;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.login-error svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  flex: 0 0 auto;
+}
+
+.demo-access {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.login .login-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .primary-button,
 .secondary-button,
 .link-button {
@@ -190,6 +239,10 @@ button { cursor: pointer; }
   min-height: 40px;
   align-self: flex-start;
   padding: 0 16px;
+}
+
+.login-form .primary-button {
+  width: 100%;
 }
 
 .compact-button {
