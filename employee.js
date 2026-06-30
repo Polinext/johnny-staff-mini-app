@@ -16,6 +16,8 @@ const icons = {
   close: '<path d="M6 6l12 12M18 6 6 18"/>'
 };
 
+const SHEETS_API_URL = "https://script.google.com/macros/s/AKfycbyHAUPmtKDo7eJO7OtLnrvrMWpfY-tjPpyHXOtbxkKknN5Zw9N6aez0B-SCihyIiagj/exec";
+
 const managers = {
   "MGR-001": {
     name: "Екатерина Новак",
@@ -212,7 +214,9 @@ let activeTab = "home";
 let formOpen = false;
 let toastTimer;
 let currentEmployeeId = null;
+let currentEmployee = null;
 let loginError = "";
+let isLoginLoading = false;
 
 const telegramApp = window.Telegram?.WebApp;
 telegramApp?.ready();
@@ -270,8 +274,10 @@ function loginScreen() {
             <input id="activation-pin" name="activation_pin" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="4" placeholder="4 цифры" required>
           </div>
           ${loginError ? `<div class="login-error">${icon("alert")}<span>${loginError}</span></div>` : ""}
-          <button class="primary-button" type="submit">${icon("telegram")} Войти</button>
-          <small class="demo-access">Демо-доступ: JS-10482 / 5831</small>
+          <button class="primary-button" type="submit" ${isLoginLoading ? "disabled" : ""}>
+            ${icon("telegram")} ${isLoginLoading ? "Проверяем..." : "Войти"}
+          </button>
+          <small class="demo-access">Данные проверяются по Google Таблице</small>
         </form>
       </div>
       <p class="login-note">После первого входа аккаунт можно будет привязать к Telegram.</p>
@@ -280,7 +286,7 @@ function loginScreen() {
 }
 
 function getEmployee() {
-  return employeeDatabase[currentEmployeeId];
+  return currentEmployee || employeeDatabase[currentEmployeeId];
 }
 
 function getInitials(name) {
@@ -292,7 +298,68 @@ function firstName(name) {
 }
 
 function formatMoney(value) {
-  return `${new Intl.NumberFormat("ru-RU").format(value)} Kč`;
+  if (typeof value === "string") {
+    const cleaned = value.trim();
+    if (cleaned.includes("Kč")) return cleaned;
+    const number = Number(cleaned.replace(/[^\d.-]/g, ""));
+    if (Number.isFinite(number)) return `${new Intl.NumberFormat("ru-RU").format(number)} Kč`;
+    return cleaned;
+  }
+  return `${new Intl.NumberFormat("ru-RU").format(value || 0)} Kč`;
+}
+
+function prefer(apiValue, fallbackValue) {
+  if (apiValue === undefined || apiValue === null || apiValue === "") return fallbackValue;
+  if (Array.isArray(apiValue) && apiValue.length === 0) return fallbackValue;
+  return apiValue;
+}
+
+function mergeSalary(apiSalary, fallbackSalary) {
+  const merged = { ...(fallbackSalary || {}) };
+  Object.entries(apiSalary || {}).forEach(([key, value]) => {
+    merged[key] = prefer(value, merged[key]);
+  });
+  return merged;
+}
+
+function normalizeEmployee(payload, employeeId) {
+  const employee = payload.employee || payload;
+  const fallback = employeeDatabase[employeeId] || {};
+  return {
+    ...fallback,
+    ...employee,
+    name: prefer(employee.name, fallback.name),
+    role: prefer(employee.role, fallback.role),
+    agency: prefer(employee.agency, fallback.agency),
+    workplace: prefer(employee.workplace, fallback.workplace),
+    status: prefer(employee.status, fallback.status),
+    reminder: prefer(employee.reminder, fallback.reminder),
+    shifts: prefer(employee.shifts, fallback.shifts || []),
+    documents: prefer(employee.documents, fallback.documents || []),
+    requests: prefer(employee.requests || employee.vacations, fallback.requests || []),
+    salary: mergeSalary(employee.salary, fallback.salary),
+    manager: employee.manager || managers[employee.managerId] || managers[fallback.managerId] || managers["MGR-001"],
+    vacationDays: Number(prefer(employee.vacationDays || employee.vacation_days, fallback.vacationDays || 0))
+  };
+}
+
+async function fetchEmployeeFromSheets(employeeId, activationPin) {
+  const url = new URL(SHEETS_API_URL);
+  url.searchParams.set("employee_id", employeeId);
+  url.searchParams.set("activation_pin", activationPin);
+  url.searchParams.set("_", Date.now().toString());
+
+  const response = await fetch(url.toString(), { method: "GET", cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("API_REQUEST_FAILED");
+  }
+
+  const data = await response.json();
+  if (!data.ok) {
+    throw new Error(data.error || "AUTH_FAILED");
+  }
+
+  return normalizeEmployee(data.employee, employeeId);
 }
 
 function topbar(title, subtitle) {
@@ -424,7 +491,7 @@ function vacationScreen() {
 }
 
 function contactsScreen() {
-  const manager = managers[getEmployee().managerId];
+  const manager = getEmployee().manager || managers[getEmployee().managerId] || managers["MGR-001"];
   const telegramHandle = manager.telegram.replace(/^@/, "");
   const phoneLink = manager.phone.replace(/[^\d+]/g, "");
   return `
@@ -481,6 +548,7 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-logout]")) {
     isLoggedIn = false;
     currentEmployeeId = null;
+    currentEmployee = null;
     activeTab = "home";
     formOpen = false;
     loginError = "";
@@ -513,27 +581,40 @@ document.addEventListener("click", (event) => {
   }
 });
 
-document.addEventListener("submit", (event) => {
+document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-login-form]")) {
     event.preventDefault();
     const formData = new FormData(event.target);
     const employeeId = String(formData.get("employee_id") || "").trim().toUpperCase();
     const activationPin = String(formData.get("activation_pin") || "").trim();
-    const employee = employeeDatabase[employeeId];
 
-    if (!employee || employee.activationPin !== activationPin) {
-      loginError = "Неверный номер сотрудника или код активации.";
+    isLoginLoading = true;
+    loginError = "";
+    render();
+
+    try {
+      currentEmployee = await fetchEmployeeFromSheets(employeeId, activationPin);
+      currentEmployeeId = employeeId;
+      isLoggedIn = true;
+      loginError = "";
+      activeTab = "home";
+      telegramApp?.HapticFeedback?.notificationOccurred("success");
+      render();
+    } catch (error) {
+      if (error.message === "AUTH_FAILED" || error.message === "EMPLOYEE_NOT_FOUND" || error.message === "PIN_INVALID") {
+        loginError = "Неверный номер сотрудника или код активации.";
+      } else {
+        loginError = "Не удалось получить данные из Google Таблицы. Проверьте публикацию Apps Script.";
+      }
+      isLoggedIn = false;
+      currentEmployeeId = null;
+      currentEmployee = null;
+      telegramApp?.HapticFeedback?.notificationOccurred("error");
       render();
       document.querySelector("#employee-id")?.focus();
-      return;
+    } finally {
+      isLoginLoading = false;
     }
-
-    currentEmployeeId = employeeId;
-    isLoggedIn = true;
-    loginError = "";
-    activeTab = "home";
-    render();
-    telegramApp?.HapticFeedback?.notificationOccurred("success");
     return;
   }
 
