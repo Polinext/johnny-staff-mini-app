@@ -153,6 +153,61 @@ button { cursor: pointer; }
   background: #f7fafb;
 }
 
+.employee-id-field {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7fafb;
+}
+
+.employee-id-field:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(34, 119, 238, .12);
+}
+
+.employee-id-field span {
+  align-self: stretch;
+  padding: 0 0 0 12px;
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.employee-id-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0 !important;
+  outline: 0;
+  box-shadow: none !important;
+  padding-left: 3px;
+}
+
+.session-loading {
+  min-height: calc(100vh - 46px);
+  padding: 32px 24px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.session-loading strong {
+  font-size: 17px;
+}
+
+.session-loading p {
+  max-width: 260px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .login-error {
   padding: 10px;
   border-radius: 8px;

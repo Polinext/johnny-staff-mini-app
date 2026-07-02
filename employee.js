@@ -217,6 +217,10 @@ let currentEmployeeId = null;
 let currentEmployee = null;
 let loginError = "";
 let isLoginLoading = false;
+let isSessionRestoring = false;
+let currentActivationPin = "";
+
+const SESSION_KEY = "johnny-staff-session";
 
 const telegramApp = window.Telegram?.WebApp;
 telegramApp?.ready();
@@ -267,7 +271,10 @@ function loginScreen() {
         <form class="login-form card" data-login-form>
           <div class="field">
             <label for="employee-id">Номер сотрудника</label>
-            <input id="employee-id" name="employee_id" autocomplete="username" placeholder="Например, JS-10482" required>
+            <div class="employee-id-field">
+              <span>JS-</span>
+              <input id="employee-id" name="employee_id" inputmode="numeric" autocomplete="username" maxlength="5" placeholder="10482" required>
+            </div>
           </div>
           <div class="field">
             <label for="activation-pin">Код активации</label>
@@ -283,6 +290,29 @@ function loginScreen() {
       <p class="login-note">После первого входа аккаунт можно будет привязать к Telegram.</p>
     </section>
   `;
+}
+
+function loadingScreen() {
+  return `
+    <section class="session-loading">
+      <div class="brand-mark">${icon("briefcase")}</div>
+      <strong>Обновляем данные...</strong>
+      <p>Получаем актуальную информацию из Google Таблицы</p>
+    </section>
+  `;
+}
+
+function saveSession() {
+  if (!currentEmployeeId || !currentActivationPin) return;
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+    employeeId: currentEmployeeId,
+    activationPin: currentActivationPin,
+    activeTab
+  }));
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 function getEmployee() {
@@ -541,7 +571,11 @@ function appScreen() {
 }
 
 function render() {
-  document.querySelector("#app").innerHTML = isLoggedIn ? appScreen() : loginScreen();
+  document.querySelector("#app").innerHTML = isSessionRestoring
+    ? loadingScreen()
+    : isLoggedIn
+      ? appScreen()
+      : loginScreen();
 }
 
 document.addEventListener("click", (event) => {
@@ -549,9 +583,11 @@ document.addEventListener("click", (event) => {
     isLoggedIn = false;
     currentEmployeeId = null;
     currentEmployee = null;
+    currentActivationPin = "";
     activeTab = "home";
     formOpen = false;
     loginError = "";
+    clearSession();
     render();
     return;
   }
@@ -560,6 +596,7 @@ document.addEventListener("click", (event) => {
   if (tab) {
     activeTab = tab.dataset.tab;
     formOpen = false;
+    saveSession();
     render();
     return;
   }
@@ -585,7 +622,8 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-login-form]")) {
     event.preventDefault();
     const formData = new FormData(event.target);
-    const employeeId = String(formData.get("employee_id") || "").trim().toUpperCase();
+    const employeeNumber = String(formData.get("employee_id") || "").replace(/\D/g, "");
+    const employeeId = `JS-${employeeNumber}`;
     const activationPin = String(formData.get("activation_pin") || "").trim();
 
     isLoginLoading = true;
@@ -595,11 +633,12 @@ document.addEventListener("submit", async (event) => {
     try {
       currentEmployee = await fetchEmployeeFromSheets(employeeId, activationPin);
       currentEmployeeId = employeeId;
+      currentActivationPin = activationPin;
       isLoggedIn = true;
       loginError = "";
       activeTab = "home";
+      saveSession();
       telegramApp?.HapticFeedback?.notificationOccurred("success");
-      render();
     } catch (error) {
       if (error.message === "AUTH_FAILED" || error.message === "EMPLOYEE_NOT_FOUND" || error.message === "PIN_INVALID") {
         loginError = "Неверный номер сотрудника или код активации.";
@@ -609,11 +648,13 @@ document.addEventListener("submit", async (event) => {
       isLoggedIn = false;
       currentEmployeeId = null;
       currentEmployee = null;
+      currentActivationPin = "";
+      clearSession();
       telegramApp?.HapticFeedback?.notificationOccurred("error");
-      render();
-      document.querySelector("#employee-id")?.focus();
     } finally {
       isLoginLoading = false;
+      render();
+      if (!isLoggedIn) document.querySelector("#employee-id")?.focus();
     }
     return;
   }
@@ -631,4 +672,42 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-render();
+async function restoreSession() {
+  let savedSession;
+
+  try {
+    savedSession = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    clearSession();
+  }
+
+  if (!savedSession?.employeeId || !savedSession?.activationPin) {
+    render();
+    return;
+  }
+
+  isSessionRestoring = true;
+  activeTab = tabs.some(([id]) => id === savedSession.activeTab)
+    ? savedSession.activeTab
+    : "home";
+  render();
+
+  try {
+    currentEmployee = await fetchEmployeeFromSheets(
+      savedSession.employeeId,
+      savedSession.activationPin
+    );
+    currentEmployeeId = savedSession.employeeId;
+    currentActivationPin = savedSession.activationPin;
+    isLoggedIn = true;
+    saveSession();
+  } catch {
+    clearSession();
+    loginError = "Сессия завершена. Войдите ещё раз.";
+  } finally {
+    isSessionRestoring = false;
+    render();
+  }
+}
+
+restoreSession();
